@@ -6,7 +6,7 @@ pkg update -y && pkg upgrade -y && pkg install -y tur-repo && pkg install -y git
 const { spawn, execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const readline = require('readline/promises'); // Modern async readline
+const readline = require('readline/promises'); 
 
 const HOME = process.env.HOME || process.cwd();
 const LLAMA_DIR = path.join(HOME, 'llama.cpp');
@@ -14,18 +14,19 @@ const LLAMA_CLI = path.join(HOME, 'llama-cli');
 const LLAMA_SERVER = path.join(HOME, 'llama-server');
 
 const MODELS = {
-  "1": { name: "AMD ReasonLite (0.6B)", hf: "AMD/ReasonLite-0.6B-GGUF:Q4_K_M", desc: "Logical powerhouse. Rivals 8B models in math/logic." },
-  "2": { name: "SmolLM2 Agentic (360M)", hf: "bartowski/SmolLM2-360M-Instruct-GGUF:Q4_K_M", desc: "Best for tool-calling/JSON. Strict follower." },
-  "3": { name: "LFM 2.5 Text (350M)", hf: "LiquidAI/LFM2.5-350M-GGUF:Q4_0", desc: "Extreme speed. Snappy 2026 responses." },
-  "4": { name: "LFM 2.5 Vision (450M)", hf: "LiquidAI/LFM2.5-VL-450M-GGUF:Q4_0", desc: "For visual/OCR tasks." },
-  "5": { name: "LFM 2.5 Thinking (1.2B)", hf: "LiquidAI/LFM2.5-1.2B-Thinking-GGUF:Q4_K_M", desc: "Reflective logic; higher intelligence tier." },
-  "6": { name: "LFM2 2.6B Exp", hf: "LiquidAI/LFM2-2.6B-Exp-GGUF:Q4_K_M", desc: "Heavy flagship for complex agents." }
+  "1": { name: "AMD ReasonLite (0.6B)", hf: "AMD/ReasonLite-0.6B-GGUF:Q4_K_M", desc: "Small math-reasoning model with strong benchmark performance for its size." },
+  "2": { name: "SmolLM2 Instruct (360M)", hf: "bartowski/SmolLM2-360M-Instruct-GGUF:Q4_K_M", desc: "Compact instruction-following model for lightweight general chat and structured tasks." },
+  "3": { name: "LFM 2.5 Text (350M)", hf: "LiquidAI/LFM2.5-350M-GGUF:Q4_0", desc: "Fast, efficient text model optimized for edge inference and tool use." },
+  "4": { name: "LFM 2.5 Vision (450M)", hf: "LiquidAI/LFM2.5-VL-450M-GGUF:Q4_0", desc: "Compact vision-language model for OCR, grounding, and image understanding." },
+  "5": { name: "LFM 2.5 Thinking (1.2B)", hf: "LiquidAI/LFM2.5-1.2B-Thinking-GGUF:Q4_K_M", desc: "Reasoning-oriented model; verify the exact repo name before shipping." },
+  "6": { name: "LFM2 2.6B Exp", hf: "LiquidAI/LFM2-2.6B-Exp-GGUF:Q4_K_M", desc: "Efficient mid-size model for stronger general-purpose local inference." },
+  "7": { name: "H2O Danube3 (500M)", hf: "h2oai/h2o-danube3-500m-chat-GGUF:Q4_K_M", desc: "Small chat model with good latency and solid conversational performance." },
+  "8": { name: "Qwen3 Instruct (0.6B)", hf: "Qwen/Qwen3-0.6B-Instruct-GGUF:Q4_K_M", desc: "Compact instruct model for lightweight agent and general text tasks." }
 };
 
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-let activeProcesses = []; // Tracks children to prevent orphaned background processes
+let activeProcesses = []; 
 
-// Graceful exit handler
 function cleanup() {
     if (activeProcesses.length > 0) {
         console.log('\n[!] Shutting down background processes (Server & Tunnel)...');
@@ -36,7 +37,7 @@ function cleanup() {
     process.exit(0);
 }
 
-process.on('SIGINT', cleanup); // Handle Ctrl+C
+process.on('SIGINT', cleanup); 
 process.on('exit', cleanup);
 
 function runCommand(desc, cmd) {
@@ -49,13 +50,22 @@ function runCommand(desc, cmd) {
     }
 }
 
+// 🔧 FIX: Transforms "Repo/Name:Quant" syntax into proper `llama.cpp` arguments 
+function getHfArgs(hfString) {
+    if (hfString.includes(':')) {
+        const [repo, quant] = hfString.split(':');
+        // Wildcard ensures we download the specific quantization successfully (*Q4_K_M*.gguf)
+        return ['--hf-repo', repo, '--hf-file', `*${quant}*.gguf`];
+    }
+    return ['--hf-repo', hfString];
+}
+
 async function start() {
     console.clear();
     console.log("========================================");
     console.log("   MAXWELL MASTER CONTROLLER v2026      ");
     console.log("========================================\n");
 
-    // Phase 1: Build Check
     if (!fs.existsSync(LLAMA_CLI) || !fs.existsSync(LLAMA_SERVER)) {
         console.log("[!] Missing binaries. Starting installation process...");
         runCommand("Installing Dependencies", "pkg update -y && pkg install -y tur-repo && pkg install -y git cmake clang wget libandroid-spawn cloudflared nodejs");
@@ -67,7 +77,6 @@ async function start() {
         console.log("[✓] Existing Llama.cpp Build Detected.\n");
     }
 
-    // Phase 2: Model Selection
     console.log("[ SELECT MODEL ]");
     Object.entries(MODELS).forEach(([k, v]) => {
         console.log(` [${k}] ${v.name.padEnd(25)} | ${v.desc}`);
@@ -80,7 +89,6 @@ async function start() {
         if (!model) console.log("Invalid selection. Try again.");
     }
 
-    // Phase 3: Launch Mode Selection
     console.log("\n[ SELECT LAUNCH MODE ]");
     console.log(" [1] Terminal Chat (Fastest, Local Interactivity)");
     console.log(" [2] Cloud Access (Remote Web API, Any Browser via Cloudflare)");
@@ -90,7 +98,7 @@ async function start() {
         modeChoice = await rl.question("\nPick a mode: ");
     }
 
-    rl.close(); // Close readline so it doesn't interfere with child processes
+    rl.close(); 
 
     if (modeChoice === "1") launchTerminal(model);
     if (modeChoice === "2") launchCloud(model);
@@ -99,9 +107,8 @@ async function start() {
 function launchTerminal(model) {
     console.log(`\n🚀 Launching Maxwell Terminal via ${model.name}...\n`);
     
-    // shell: false prevents quotes around the prompt from breaking
     const chat = spawn(LLAMA_CLI, [
-        '-hf', model.hf, 
+        ...getHfArgs(model.hf), // Applies the fix
         '-t', '8', 
         '-c', '2048', 
         '-cnv', 
@@ -118,22 +125,22 @@ function launchCloud(model) {
     console.log("-".repeat(50));
 
     const server = spawn(LLAMA_SERVER, [
-        '-hf', model.hf, 
+        ...getHfArgs(model.hf), // Applies the fix
         '-t', '8', 
         '-c', '2048', 
-        '--port', '8080'
+        '--host', '0.0.0.0', // 🔧 FIX: Bind to all interfaces for tunnel proxy access
+        '--port', '8080',
+        '--cors'             // 🔧 FIX: Ensures CORS doesn't block Cloud Web UI interactivity 
     ], { shell: false });
 
     activeProcesses.push(server);
 
     let tunnelLaunched = false;
 
-    // Helper function to handle output from both stdout and stderr
     const handleData = (data) => {
         const out = data.toString();
-        process.stdout.write(out); // Shows logs to user
+        process.stdout.write(out);
 
-        // UPDATED: More flexible detection for the server being ready
         const isReady = out.includes("listening on") || 
                         out.includes("HTTP server listening") || 
                         out.includes("starting the main loop");
@@ -157,11 +164,9 @@ function startCloudflareTunnel() {
     const tunnel = spawn('cloudflared', ['tunnel', '--url', 'http://127.0.0.1:8080'], { shell: false });
     activeProcesses.push(tunnel);
 
-    // Cloudflared also logs strictly to stderr
     tunnel.stderr.on('data', (tData) => {
         const out = tData.toString();
         
-        // Regex to extract the Cloudflare URL
         const urlMatch = out.match(/https:\/\/[a-zA-Z0-9-]+\.trycloudflare\.com/);
         if (urlMatch) {
             console.log("\n" + "=".repeat(60));
@@ -176,5 +181,4 @@ function startCloudflareTunnel() {
     tunnel.on('exit', () => cleanup());
 }
 
-// Boot
 start();
