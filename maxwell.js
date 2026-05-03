@@ -1,15 +1,11 @@
 /*
-MAXWELL T1 — Ultra-Fast Local AI Launcher
+MAXWELL T1 — Ultra-Fast Local AI Launcher (FIXED)
 
-INSTALL (fresh Termux):
-pkg update -y && pkg upgrade -y && \
-pkg install -y tur-repo && \
-pkg install -y git cmake clang wget libandroid-spawn cloudflared nodejs && \
-git clone https://github.com/ggml-org/llama.cpp && \
-cd llama.cpp && cmake -B build && cmake --build build --config Release -j8 && \
-cp build/bin/llama-cli ~/llama-cli && \
-cp build/bin/llama-server ~/llama-server && \
-chmod +x ~/llama-cli ~/llama-server
+Key fixes:
+- Robust HF model resolution (no crashes)
+- Quant fallback system (Q3 → Q4 → smallest)
+- Safe error handling
+- Full performance tuning retained
 */
 
 const { spawn, execSync } = require('child_process');
@@ -56,19 +52,62 @@ function saveCache(cache) {
     fs.writeFileSync(HF_CACHE_FILE, JSON.stringify(cache, null, 2));
 }
 
+/*
+🔥 FIXED FUNCTION — NO MORE CRASHES
+*/
 async function resolveHF(hfString) {
     const cache = loadCache();
     if (cache[hfString]) return cache[hfString];
 
     const [repo, quant] = hfString.split(':');
 
+    console.log(`[🔎] Resolving model: ${repo} (${quant})`);
+
     const res = await fetch(`https://huggingface.co/api/models/${repo}`);
+    if (!res.ok) {
+        console.error(`[X] Failed to fetch model repo (${res.status})`);
+        process.exit(1);
+    }
+
     const data = await res.json();
 
-    const file = data.siblings.find(f =>
-        f.rfilename.toLowerCase().includes(quant.toLowerCase()) &&
-        f.rfilename.endsWith('.gguf')
+    if (!data.siblings) {
+        console.error("[X] Invalid Hugging Face response.");
+        process.exit(1);
+    }
+
+    const ggufs = data.siblings.filter(f => f.rfilename.endsWith('.gguf'));
+
+    if (ggufs.length === 0) {
+        console.error("[X] No GGUF files found in repo.");
+        process.exit(1);
+    }
+
+    // 1. Exact match
+    let file = ggufs.find(f =>
+        f.rfilename.toLowerCase().includes(quant.toLowerCase())
     );
+
+    // 2. Fallback → Q4_K_M
+    if (!file) {
+        console.log("[!] Exact quant not found. Falling back to Q4_K_M...");
+        file = ggufs.find(f =>
+            f.rfilename.toLowerCase().includes("q4_k_m")
+        );
+    }
+
+    // 3. Final fallback → smallest file
+    if (!file) {
+        console.log("[!] No preferred quant found. Picking smallest GGUF...");
+        file = ggufs.sort((a, b) => (a.size || 0) - (b.size || 0))[0];
+    }
+
+    if (!file) {
+        console.error("[X] Could not resolve any usable model file.");
+        process.exit(1);
+    }
+
+    console.log(`[✓] Using: ${file.rfilename}`);
 
     const args = ['--hf-repo', repo, '--hf-file', file.rfilename];
 
@@ -165,6 +204,11 @@ async function start() {
 
     let choice = await rl.question("Choice: ");
     let model = MODELS[choice];
+
+    if (!model) {
+        console.log("Invalid choice.");
+        process.exit(1);
+    }
 
     console.log("\nMode:");
     console.log("[1] Terminal (fastest)");
