@@ -1,224 +1,219 @@
 /*
-MAXWELL T1 — Ultra-Fast Local AI Launcher (FIXED)
-
-Key fixes:
-- Robust HF model resolution (no crashes)
-- Quant fallback system (Q3 → Q4 → smallest)
-- Safe error handling
-- Full performance tuning retained
+INSTALLATION COMMAND (Run this if starting fresh):
+pkg update -y && pkg upgrade -y && pkg install -y tur-repo && pkg install -y git cmake clang wget libandroid-spawn cloudflared nodejs && git clone https://github.com/ggml-org/llama.cpp && cd llama.cpp && cmake -B build && cmake --build build --config Release -j8 && cp build/bin/llama-cli ~/llama-cli && cp build/bin/llama-server ~/llama-server
 */
 
 const { spawn, execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const os = require('os');
-const readline = require('readline/promises');
+const readline = require('readline/promises'); 
 
 const HOME = process.env.HOME || process.cwd();
 const LLAMA_DIR = path.join(HOME, 'llama.cpp');
 const LLAMA_CLI = path.join(HOME, 'llama-cli');
 const LLAMA_SERVER = path.join(HOME, 'llama-server');
-const HF_CACHE_FILE = path.join(HOME, '.hf_cache.json');
-const PROMPT_CACHE = path.join(HOME, '.llama_prompt_cache');
-
-const threads = Math.max(2, Math.floor(os.cpus().length * 0.75));
 
 const MODELS = {
-  "1": { name: "Qwen 2.5 (0.5B)", hf: "bartowski/Qwen2.5-0.5B-Instruct-GGUF:Q3_K_S" },
-  "2": { name: "SmolLM2 (360M)", hf: "bartowski/SmolLM2-360M-Instruct-GGUF:Q3_K_S" },
-  "3": { name: "Llama 3.2 (1B)", hf: "bartowski/Llama-3.2-1B-Instruct-GGUF:Q3_K_S" },
-  "4": { name: "Qwen 2.5 (1.5B)", hf: "bartowski/Qwen2.5-1.5B-Instruct-GGUF:Q3_K_S" },
+  "1": { name: "Qwen 2.5 (0.5B)", hf: "bartowski/Qwen2.5-0.5B-Instruct-GGUF:Q4_K_M", desc: "Small, highly capable math and reasoning model." },
+  "2": { name: "SmolLM2 Instruct (360M)", hf: "bartowski/SmolLM2-360M-Instruct-GGUF:Q4_K_M", desc: "Compact instruction-following model for lightweight tasks." },
+  "3": { name: "Llama 3.2 (1B)", hf: "bartowski/Llama-3.2-1B-Instruct-GGUF:Q4_K_M", desc: "Fast, efficient text model optimized for edge inference." },
+  "4": { name: "Qwen 2.5 (1.5B)", hf: "bartowski/Qwen2.5-1.5B-Instruct-GGUF:Q4_K_M", desc: "Stronger reasoning and conversational performance." },
+  "5": { name: "H2O Danube 3 (500M)", hf: "h2oai/h2o-danube3-500m-chat-GGUF:q4_k_m", desc: "Small chat model with excellent latency." },
+  "6": { name: "Llama 3.2 (3B)", hf: "bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M", desc: "Mid-size model for heavier general-purpose local inference." }
 };
 
-let activeProcesses = [];
+const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+let activeProcesses = []; 
 
 function cleanup() {
-    activeProcesses.forEach(p => { try { p.kill('SIGINT'); } catch {} });
+    if (activeProcesses.length > 0) {
+        console.log('\n[!] Shutting down background processes (Server & Tunnel)...');
+        activeProcesses.forEach(p => {
+            try { p.kill('SIGINT'); } catch (e) {}
+        });
+    }
     process.exit(0);
 }
 
-process.on('SIGINT', cleanup);
+process.on('SIGINT', cleanup); 
+process.on('exit', cleanup);
 
-function run(cmd) {
-    execSync(cmd, { stdio: 'inherit', shell: true });
+function runCommand(desc, cmd) {
+    console.log(`\n>> ${desc}...`);
+    try { 
+        execSync(cmd, { stdio: 'inherit', shell: true }); 
+    } catch (e) { 
+        console.error(`\n[X] Failed: ${desc}`); 
+        process.exit(1); 
+    }
 }
 
-function loadCache() {
-    if (!fs.existsSync(HF_CACHE_FILE)) return {};
-    return JSON.parse(fs.readFileSync(HF_CACHE_FILE));
-}
-
-function saveCache(cache) {
-    fs.writeFileSync(HF_CACHE_FILE, JSON.stringify(cache, null, 2));
-}
-
-/*
-🔥 FIXED FUNCTION — NO MORE CRASHES
-*/
-async function resolveHF(hfString) {
-    const cache = loadCache();
-    if (cache[hfString]) return cache[hfString];
+async function getHfArgs(hfString) {
+    if (!hfString.includes(':')) return ['--hf-repo', hfString];
 
     const [repo, quant] = hfString.split(':');
+    console.log(`\n[🔎] Resolving exact filename for '${quant}' in '${repo}'...`);
 
-    console.log(`[🔎] Resolving model: ${repo} (${quant})`);
+    try {
+        const res = await fetch(`https://huggingface.co/api/models/${repo}`);
+        
+        if (res.status === 401) {
+            console.error(`\n[X] ERROR 401: Hugging Face denied access.`);
+            console.error(`    -> The repository '${repo}' likely DOES NOT EXIST (Hallucinated name) or is Private.`);
+            process.exit(1);
+        }
+        if (res.status === 404) {
+            console.error(`\n[X] ERROR 404: Repository '${repo}' does not exist on Hugging Face.`);
+            process.exit(1);
+        }
+        if (!res.ok) throw new Error(`HTTP Error ${res.status}`);
 
-    const res = await fetch(`https://huggingface.co/api/models/${repo}`);
-    if (!res.ok) {
-        console.error(`[X] Failed to fetch model repo (${res.status})`);
-        process.exit(1);
-    }
+        const data = await res.json();
+        if (!data.siblings) throw new Error("Invalid repository data.");
 
-    const data = await res.json();
-
-    if (!data.siblings) {
-        console.error("[X] Invalid Hugging Face response.");
-        process.exit(1);
-    }
-
-    const ggufs = data.siblings.filter(f => f.rfilename.endsWith('.gguf'));
-
-    if (ggufs.length === 0) {
-        console.error("[X] No GGUF files found in repo.");
-        process.exit(1);
-    }
-
-    // 1. Exact match
-    let file = ggufs.find(f =>
-        f.rfilename.toLowerCase().includes(quant.toLowerCase())
-    );
-
-    // 2. Fallback → Q4_K_M
-    if (!file) {
-        console.log("[!] Exact quant not found. Falling back to Q4_K_M...");
-        file = ggufs.find(f =>
-            f.rfilename.toLowerCase().includes("q4_k_m")
+        const fileObj = data.siblings.find(s => 
+            s.rfilename.toLowerCase().includes(quant.toLowerCase()) && 
+            s.rfilename.endsWith('.gguf')
         );
-    }
 
-    // 3. Final fallback → smallest file
-    if (!file) {
-        console.log("[!] No preferred quant found. Picking smallest GGUF...");
-        file = ggufs.sort((a, b) => (a.size || 0) - (b.size || 0))[0];
-    }
+        if (!fileObj) {
+            console.error(`\n[X] ERROR: Could not find any .gguf file containing '${quant}' in '${repo}'.`);
+            console.error(`    Available files: ${data.siblings.filter(s => s.rfilename.endsWith('.gguf')).map(s=>s.rfilename).slice(0,4).join(', ')}...`);
+            process.exit(1);
+        }
 
-    if (!file) {
-        console.error("[X] Could not resolve any usable model file.");
+        console.log(`[✓] Found exact file: ${fileObj.rfilename}`);
+        return ['--hf-repo', repo, '--hf-file', fileObj.rfilename];
+
+    } catch (err) {
+        console.error(`\n[X] Failed to fetch repo data: ${err.message}`);
         process.exit(1);
     }
-
-    console.log(`[✓] Using: ${file.rfilename}`);
-
-    const args = ['--hf-repo', repo, '--hf-file', file.rfilename];
-
-    cache[hfString] = args;
-    saveCache(cache);
-
-    return args;
-}
-
-function getCommonArgs(context) {
-    return [
-        '-t', String(threads),
-        '-c', context,
-        '-b', '256',
-        '-ub', '512',
-        '-fa',
-        '-mmap',
-        '-mlock',
-        '--prompt-cache', PROMPT_CACHE
-    ];
-}
-
-async function launchTerminal(model) {
-    console.log(`\n🚀 Maxwell T1 launching ${model.name}...\n`);
-
-    const hfArgs = await resolveHF(model.hf);
-    const context = model.name.includes("1.5B") ? '4096' : '2048';
-
-    const proc = spawn(LLAMA_CLI, [
-        ...hfArgs,
-        ...getCommonArgs(context),
-        '-cnv',
-        '-p', 'You are Maxwell, a fast and helpful assistant.'
-    ], { stdio: 'inherit' });
-
-    activeProcesses.push(proc);
-}
-
-async function launchCloud(model) {
-    console.log(`\n🚀 Starting API server...\n`);
-
-    const hfArgs = await resolveHF(model.hf);
-    const context = model.name.includes("1.5B") ? '4096' : '2048';
-
-    const server = spawn(LLAMA_SERVER, [
-        ...hfArgs,
-        ...getCommonArgs(context),
-        '--host', '0.0.0.0',
-        '--port', '8080',
-        '--parallel', '2'
-    ]);
-
-    activeProcesses.push(server);
-
-    setTimeout(() => {
-        console.log("\n🌐 Starting Cloudflare tunnel...\n");
-
-        const tunnel = spawn('cloudflared', [
-            'tunnel', '--url', 'http://127.0.0.1:8080'
-        ]);
-
-        tunnel.stderr.on('data', d => {
-            const match = d.toString().match(/https:\/\/[^\s]+/);
-            if (match) {
-                console.log("\n====================================");
-                console.log("🌍 MAXWELL CLOUD READY");
-                console.log("🔗 " + match[0]);
-                console.log("====================================\n");
-            }
-        });
-
-        activeProcesses.push(tunnel);
-    }, 2000);
 }
 
 async function start() {
     console.clear();
-    console.log("===== MAXWELL T1 =====\n");
+    console.log("========================================");
+    console.log("   MAXWELL MASTER CONTROLLER v2026      ");
+    console.log("========================================\n");
 
-    if (!fs.existsSync(LLAMA_CLI)) {
-        console.log("Installing...");
-        run(`pkg install -y git cmake clang wget libandroid-spawn nodejs`);
-        run(`git clone https://github.com/ggml-org/llama.cpp ${LLAMA_DIR}`);
-        run(`cd ${LLAMA_DIR} && cmake -B build && cmake --build build -j${threads}`);
-        run(`cp ${LLAMA_DIR}/build/bin/llama-* ${HOME}`);
+    if (!fs.existsSync(LLAMA_CLI) || !fs.existsSync(LLAMA_SERVER)) {
+        console.log("[!] Missing binaries. Starting installation process...");
+        runCommand("Installing Dependencies", "pkg update -y && pkg install -y tur-repo && pkg install -y git cmake clang wget libandroid-spawn cloudflared nodejs");
+        runCommand("Cloning llama.cpp", `git clone https://github.com/ggml-org/llama.cpp ${LLAMA_DIR}`);
+        runCommand("Building Binaries", `cd ${LLAMA_DIR} && cmake -B build && cmake --build build --config Release -j8`);
+        runCommand("Setting up shortcuts", `cp ${LLAMA_DIR}/build/bin/llama-cli ${LLAMA_CLI} && cp ${LLAMA_DIR}/build/bin/llama-server ${LLAMA_SERVER} && chmod +x ${LLAMA_CLI} ${LLAMA_SERVER}`);
+        console.log("[✓] Build Complete.\n");
+    } else {
+        console.log("[✓] Existing Llama.cpp Build Detected.\n");
     }
 
-    console.log("\nSelect model:");
-    Object.entries(MODELS).forEach(([k, v]) =>
-        console.log(`[${k}] ${v.name}`)
-    );
-
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-
-    let choice = await rl.question("Choice: ");
-    let model = MODELS[choice];
-
-    if (!model) {
-        console.log("Invalid choice.");
-        process.exit(1);
+    console.log("[ SELECT MODEL ]");
+    Object.entries(MODELS).forEach(([k, v]) => {
+        console.log(` [${k}] ${v.name.padEnd(25)} | ${v.desc}`);
+    });
+    
+    let model = null;
+    while (!model) {
+        const mChoice = await rl.question("\nPick a number: ");
+        model = MODELS[mChoice];
+        if (!model) console.log("Invalid selection. Try again.");
     }
 
-    console.log("\nMode:");
-    console.log("[1] Terminal (fastest)");
-    console.log("[2] Cloud");
+    console.log("\n[ SELECT LAUNCH MODE ]");
+    console.log(" [1] Terminal Chat (Fastest, Local Interactivity)");
+    console.log(" [2] Cloud Access (Remote Web API, Any Browser via Cloudflare)");
 
-    let mode = await rl.question("Choice: ");
-    rl.close();
+    let modeChoice = "";
+    while (!["1", "2"].includes(modeChoice)) {
+        modeChoice = await rl.question("\nPick a mode: ");
+    }
 
-    if (mode === "1") await launchTerminal(model);
-    else await launchCloud(model);
+    rl.close(); 
+
+    if (modeChoice === "1") await launchTerminal(model);
+    if (modeChoice === "2") await launchCloud(model);
+}
+
+async function launchTerminal(model) {
+    console.log(`\n🚀 Launching Maxwell Terminal via ${model.name}...\n`);
+    
+    const hfArgs = await getHfArgs(model.hf); 
+
+    const chat = spawn(LLAMA_CLI, [
+        ...hfArgs,
+        '-t', '8', 
+        '-c', '2048', 
+        '-cnv', 
+        '-p', 'You are Maxwell, a helpful and natural assistant.'
+    ], { stdio: 'inherit', shell: false });
+
+    activeProcesses.push(chat);
+    chat.on('exit', () => cleanup());
+}
+
+async function launchCloud(model) {
+    console.log(`\n[1/2] Launching API Server on Port 8080...`);
+    console.log(`(Model will automatically download if not cached. See progress below)`);
+    console.log("-".repeat(50));
+
+    const hfArgs = await getHfArgs(model.hf); 
+
+    // 🔧 FIX: Removed the deprecated `--cors` flag.
+    const server = spawn(LLAMA_SERVER, [
+        ...hfArgs,
+        '-t', '8', 
+        '-c', '2048', 
+        '--host', '0.0.0.0', 
+        '--port', '8080'
+    ], { shell: false });
+
+    activeProcesses.push(server);
+
+    let tunnelLaunched = false;
+
+    const handleData = (data) => {
+        const out = data.toString();
+        process.stdout.write(out);
+
+        const isReady = out.includes("listening on") || 
+                        out.includes("HTTP server listening") || 
+                        out.includes("starting the main loop");
+
+        if (isReady && !tunnelLaunched) {
+            tunnelLaunched = true;
+            console.log("\n" + "=".repeat(50));
+            console.log("✅ SERVER DETECTED! BOOTING CLOUDFLARE TUNNEL...");
+            console.log("=".repeat(50) + "\n");
+            startCloudflareTunnel();
+        }
+    };
+
+    server.stdout.on('data', handleData);
+    server.stderr.on('data', handleData);
+
+    server.on('exit', () => cleanup());
+}
+
+function startCloudflareTunnel() {
+    const tunnel = spawn('cloudflared', ['tunnel', '--url', 'http://127.0.0.1:8080'], { shell: false });
+    activeProcesses.push(tunnel);
+
+    tunnel.stderr.on('data', (tData) => {
+        const out = tData.toString();
+        
+        const urlMatch = out.match(/https:\/\/[a-zA-Z0-9-]+\.trycloudflare\.com/);
+        if (urlMatch) {
+            console.log("\n" + "=".repeat(60));
+            console.log(" 🌐 MAXWELL CLOUD ACCESS READY");
+            console.log(` 🔗 LINK: ${urlMatch[0]}`);
+            console.log(" 💡 Status: Use any browser on any network to access the API.");
+            console.log(" press [Ctrl+C] to safely shut down the server.");
+            console.log("=".repeat(60) + "\n");
+        }
+    });
+
+    tunnel.on('exit', () => cleanup());
 }
 
 start();
