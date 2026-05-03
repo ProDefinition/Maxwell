@@ -1,7 +1,7 @@
 /*
- * Maxwell Master Controller v2026 – Zero‑install LLM Launcher for Termux
- * Automatically detects existing llama.cpp builds and reused compiled binaries.
- * No manual setup required; simply run: node maxwell.js
+ * Maxwell Master Controller v2026 – LLM Launcher for Termux
+ * Detects existing llama.cpp builds, offers local chat or Cloudflare tunnel.
+ * Run: node maxwell.js
  */
 
 const { spawn, execSync } = require('child_process');
@@ -11,13 +11,7 @@ const readline = require('readline');
 
 const HOME = process.env.HOME;
 
-// Possible locations where an existing llama.cpp repo might live
-const REPO_PATHS = [
-  path.join(HOME, 'llama.cpp'),         // from original command
-  path.join(HOME, 'maxwell-llama')      // our dedicated dir
-];
-
-// Possible locations of the compiled binaries
+// Locations where binaries might live
 const CLI_CANDIDATES = [
   path.join(HOME, 'llama-cli'),
   path.join(HOME, 'maxwell-llama', 'llama-cli'),
@@ -40,7 +34,8 @@ const MODELS = {
 
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 
-// Helper to run a shell command synchronously with progress
+// ------------------------------------------------------------------
+// Helpers
 function runCommand(desc, cmd) {
   console.log(`\n>> ${desc}...`);
   try {
@@ -52,7 +47,6 @@ function runCommand(desc, cmd) {
   }
 }
 
-// Check if a command exists in PATH
 function commandExists(cmd) {
   try {
     execSync(`command -v ${cmd}`, { stdio: 'ignore' });
@@ -62,7 +56,6 @@ function commandExists(cmd) {
   }
 }
 
-// Find the first existing file from a list of candidates
 function findExisting(candidates) {
   for (const p of candidates) {
     if (fs.existsSync(p)) return p;
@@ -71,90 +64,77 @@ function findExisting(candidates) {
 }
 
 // ------------------------------------------------------------------
-// Phase 0: Environment Detection & Setup
+// Phase 0: Environment Setup
 async function ensureEnvironment() {
   console.clear();
   console.log("--- Maxwell Master Controller v2026 ---\n");
 
-  // 1. Locate existing binaries (fast path)
   let cliPath = findExisting(CLI_CANDIDATES);
   let serverPath = findExisting(SERVER_CANDIDATES);
-  let repoPath = findExisting(REPO_PATHS);
+  let repoPath = findExisting([
+    path.join(HOME, 'llama.cpp'),
+    path.join(HOME, 'maxwell-llama')
+  ]);
 
-  // If we already have both binaries, we're done – no build needed
-  if (cliPath && serverPath) {
-    console.log("[✓] Existing binaries detected:");
-    console.log(`    llama-cli    → ${cliPath}`);
-    console.log(`    llama-server → ${serverPath}`);
-    return { cli: cliPath, server: serverPath };
-  }
-
-  // If only llama-cli exists but server is missing
-  if (cliPath && !serverPath && repoPath) {
-    console.log("[✓] Found llama-cli but no llama-server. Copying server from existing build...");
+  // If server missing but we have a build directory, copy it
+  if (!serverPath && cliPath && repoPath) {
     const builtServer = path.join(repoPath, 'build', 'bin', 'llama-server');
     if (fs.existsSync(builtServer)) {
-      const destServer = path.join(HOME, 'llama-server'); // friendly location
-      fs.copyFileSync(builtServer, destServer);
-      fs.chmodSync(destServer, '755');
-      serverPath = destServer;
-      console.log(`[✓] llama-server installed → ${destServer}`);
-      return { cli: cliPath, server: serverPath };
-    } else {
-      console.log("[!] Server binary not found in existing build. Cloud mode will be unavailable.");
-      return { cli: cliPath, server: null };
+      const dest = path.join(HOME, 'llama-server');
+      fs.copyFileSync(builtServer, dest);
+      fs.chmodSync(dest, '755');
+      serverPath = dest;
+      console.log(`[✓] Copied llama-server → ${dest}`);
     }
   }
 
-  // If nothing useful found, perform a minimal install
-  console.log("[!] No existing build found. Starting fresh installation (this may take a while)...");
+  // If either binary still missing, do full install
+  if (!cliPath || !serverPath) {
+    console.log("[!] Missing binaries. Running full installation (this may take a while)...");
+    runCommand("Installing dependencies", "pkg update -y && pkg upgrade -y && pkg install -y git cmake clang wget libandroid-spawn cloudflared python");
+    if (!commandExists('huggingface-cli')) {
+      runCommand("Installing huggingface-hub", "pip install huggingface-hub");
+    }
 
-  // Ensure basic dependencies
-  runCommand(
-    "Installing system dependencies",
-    "pkg update -y && pkg upgrade -y && pkg install -y git cmake clang wget libandroid-spawn cloudflared python"
-  );
-  if (!commandExists('huggingface-cli')) {
-    runCommand("Installing huggingface-hub", "pip install huggingface-hub");
+    if (!repoPath) {
+      repoPath = path.join(HOME, 'maxwell-llama');
+      runCommand("Cloning llama.cpp", `git clone https://github.com/ggml-org/llama.cpp ${repoPath}`);
+    } else {
+      console.log(`[✓] Using existing repository at ${repoPath}`);
+    }
+
+    // Build if needed
+    const builtCli = path.join(repoPath, 'build', 'bin', 'llama-cli');
+    const builtServer = path.join(repoPath, 'build', 'bin', 'llama-server');
+    if (!fs.existsSync(builtCli) || !fs.existsSync(builtServer)) {
+      runCommand("Building binaries", `cd ${repoPath} && cmake -B build && cmake --build build --config Release -j8`);
+    }
+
+    // Copy to home
+    if (!cliPath && fs.existsSync(builtCli)) {
+      cliPath = path.join(HOME, 'llama-cli');
+      fs.copyFileSync(builtCli, cliPath);
+      fs.chmodSync(cliPath, '755');
+    }
+    if (!serverPath && fs.existsSync(builtServer)) {
+      serverPath = path.join(HOME, 'llama-server');
+      fs.copyFileSync(builtServer, serverPath);
+      fs.chmodSync(serverPath, '755');
+    }
+    console.log("[✓] Installation complete.");
   } else {
-    console.log("[✓] huggingface-hub already installed.");
+    console.log("[✓] Existing binaries detected:");
+    console.log(`    llama-cli    → ${cliPath}`);
+    console.log(`    llama-server → ${serverPath}`);
   }
 
-  // Use dedicated directory if no repo exists
-  if (!repoPath) {
-    repoPath = path.join(HOME, 'maxwell-llama');
-    runCommand("Cloning llama.cpp", `git clone https://github.com/ggml-org/llama.cpp ${repoPath}`);
-  } else {
-    console.log(`[✓] Using existing repository at ${repoPath}`);
-  }
-
-  // Build if binaries are absent
-  const builtCli = path.join(repoPath, 'build', 'bin', 'llama-cli');
-  const builtServer = path.join(repoPath, 'build', 'bin', 'llama-server');
-  if (!fs.existsSync(builtCli) || !fs.existsSync(builtServer)) {
-    runCommand("Building binaries", `cd ${repoPath} && cmake -B build && cmake --build build --config Release -j8`);
-  }
-
-  // Install to home
-  if (!cliPath && fs.existsSync(builtCli)) {
-    cliPath = path.join(HOME, 'llama-cli');
-    fs.copyFileSync(builtCli, cliPath);
-    fs.chmodSync(cliPath, '755');
-  }
-  if (!serverPath && fs.existsSync(builtServer)) {
-    serverPath = path.join(HOME, 'llama-server');
-    fs.copyFileSync(builtServer, serverPath);
-    fs.chmodSync(serverPath, '755');
-  }
-
-  console.log("[✓] Setup complete.\n");
   return { cli: cliPath, server: serverPath };
 }
 
 // ------------------------------------------------------------------
-// Phase 2: Model selection
+// Model selection
 function selectModel() {
-  console.log("[ SELECT MODEL ]");
+  console.log("\n[ SELECT MODEL ]");
   Object.entries(MODELS).forEach(([key, model]) => {
     console.log(`${key}: ${model.name.padEnd(28)} | ${model.desc}`);
   });
@@ -174,34 +154,26 @@ function selectModel() {
 }
 
 // ------------------------------------------------------------------
-// Phase 3: Launch mode selection
-function selectLaunchMode(model, { cli, server }) {
+// Launch mode selection
+function selectLaunchMode(model, paths) {
   console.log("\n[ SELECT LAUNCH MODE ]");
-  console.log("1: Terminal Chat (Fastest, local interactivity)");
-  if (server) {
-    console.log("2: Cloud via Cloudflare (Access from any browser)");
-  } else {
-    console.log("2: Cloud mode UNAVAILABLE (llama-server not found)");
-  }
+  console.log("1: Terminal Chat (Local)");
+  console.log("2: Cloudflare Tunnel (Public link)");
   console.log("3: Back to model selection");
 
   rl.question("\nPick a mode: ", (choice) => {
-    if (choice === '1') launchTerminal(model, cli);
-    else if (choice === '2' && server) launchCloud(model, server);
-    else if (choice === '2') {
-      console.log("Cloud mode cannot be started without llama-server.");
-      selectLaunchMode(model, { cli, server });
-    }
+    if (choice === '1') launchTerminal(model, paths.cli);
+    else if (choice === '2') launchCloudflareTunnel(model, paths.server);
     else if (choice === '3') selectModel();
     else {
       console.log("Invalid choice.");
-      selectLaunchMode(model, { cli, server });
+      selectLaunchMode(model, paths);
     }
   });
 }
 
 // ------------------------------------------------------------------
-// Terminal Chat mode
+// Terminal Chat (completely unchanged)
 function launchTerminal(model, cliPath) {
   console.log(`\nLaunching Maxwell Terminal with ${model.name}...`);
   console.log("(Type /exit to quit)\n");
@@ -213,28 +185,22 @@ function launchTerminal(model, cliPath) {
     '--mlock',
     '-cnv',
     '-p', `"You are Maxwell, a helpful and natural assistant."`
-  ], {
-    stdio: 'inherit',
-    shell: true
-  });
+  ], { stdio: 'inherit', shell: true });
 
   chat.on('error', (err) => {
     console.error(`[ERROR] Failed to start llama-cli: ${err.message}`);
     process.exit(1);
   });
-
   chat.on('exit', (code) => {
-    if (code !== 0) {
-      console.error(`[ERROR] llama-cli exited with code ${code}`);
-    }
+    if (code !== 0) console.error(`[ERROR] llama-cli exited with code ${code}`);
     console.log("\nChat ended. Returning to menu...");
     start();
   });
 }
 
 // ------------------------------------------------------------------
-// Cloud mode
-function launchCloud(model, serverPath) {
+// Cloudflare Tunnel mode (new, robust)
+function launchCloudflareTunnel(model, serverPath) {
   console.log(`\n[1/2] Starting API server with ${model.name}...`);
 
   const server = spawn(serverPath, [
@@ -243,10 +209,7 @@ function launchCloud(model, serverPath) {
     '-c', '2048',
     '--mlock',
     '--port', '8080'
-  ], {
-    stdio: ['ignore', 'pipe', 'pipe'],
-    shell: true
-  });
+  ], { stdio: ['ignore', 'pipe', 'pipe'], shell: true });
 
   let tunnelStarted = false;
 
@@ -254,7 +217,7 @@ function launchCloud(model, serverPath) {
     const text = data.toString();
     if (!tunnelStarted && text.includes("HTTP server listening")) {
       tunnelStarted = true;
-      console.log("[2/2] Server live on port 8080. Opening Cloudflare Tunnel...");
+      console.log("[2/2] Server live on port 8080. Opening Cloudflare tunnel...");
 
       const tunnel = spawn('cloudflared', ['tunnel', '--url', 'http://localhost:8080'], {
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -275,14 +238,14 @@ function launchCloud(model, serverPath) {
         }
       });
 
-      tunnel.stderr.on('data', (err) => console.error("[Tunnel Error]", err.toString()));
+      tunnel.stderr.on('data', (err) => console.error("[Tunnel]", err.toString()));
       tunnel.on('error', (err) => {
-        console.error(`[ERROR] Cloudflare tunnel failed: ${err.message}`);
+        console.error(`[ERROR] Tunnel crashed: ${err.message}`);
         server.kill();
         process.exit(1);
       });
       tunnel.on('exit', (code) => {
-        console.log(`Tunnel closed (exit code ${code}). Shutting down server...`);
+        console.log(`Tunnel closed (code ${code}). Shutting down server...`);
         server.kill();
         start();
       });
@@ -291,13 +254,11 @@ function launchCloud(model, serverPath) {
 
   server.stderr.on('data', (data) => console.error("[Server]", data.toString()));
   server.on('error', (err) => {
-    console.error(`[ERROR] Server failed to start: ${err.message}`);
+    console.error(`[ERROR] Server failed: ${err.message}`);
     process.exit(1);
   });
   server.on('exit', (code) => {
-    if (!tunnelStarted) {
-      console.error(`[ERROR] Server exited prematurely (code ${code}).`);
-    }
+    if (!tunnelStarted) console.error(`[ERROR] Server exited prematurely (code ${code}).`);
     process.exit(code);
   });
 }
@@ -306,18 +267,17 @@ function launchCloud(model, serverPath) {
 // Main
 async function start() {
   const { cli, server } = await ensureEnvironment();
-  selectModel();
-  // store paths for later use
+  // Store paths so we can pass them to selectLaunchMode
   selectLaunchMode._paths = { cli, server };
+  selectModel();
 }
 
-// Patch to keep paths available
+// Patch selectLaunchMode to always receive the saved paths
 const originalSelectLaunchMode = selectLaunchMode;
 selectLaunchMode = (model) => {
   originalSelectLaunchMode(model, selectLaunchMode._paths);
 };
 
-// Graceful exit
 process.on('SIGINT', () => {
   console.log("\nInterrupted. Exiting...");
   process.exit();
