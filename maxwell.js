@@ -128,18 +128,27 @@ function launchCloud(model) {
 
     let tunnelLaunched = false;
 
-    // llama.cpp outputs almost everything to stderr, not stdout
-    server.stderr.on('data', (data) => {
+    // Helper function to handle output from both stdout and stderr
+    const handleData = (data) => {
         const out = data.toString();
-        process.stdout.write(out); // Shows download progress to user
+        process.stdout.write(out); // Shows logs to user
 
-        if (out.includes("HTTP server listening") && !tunnelLaunched) {
+        // UPDATED: More flexible detection for the server being ready
+        const isReady = out.includes("listening on") || 
+                        out.includes("HTTP server listening") || 
+                        out.includes("starting the main loop");
+
+        if (isReady && !tunnelLaunched) {
             tunnelLaunched = true;
-            console.log("\n" + "-".repeat(50));
-            console.log("[2/2] Server live! Booting Cloudflare Tunnel...");
+            console.log("\n" + "=".repeat(50));
+            console.log("✅ SERVER DETECTED! BOOTING CLOUDFLARE TUNNEL...");
+            console.log("=".repeat(50) + "\n");
             startCloudflareTunnel();
         }
-    });
+    };
+
+    server.stdout.on('data', handleData);
+    server.stderr.on('data', handleData);
 
     server.on('exit', () => cleanup());
 }
