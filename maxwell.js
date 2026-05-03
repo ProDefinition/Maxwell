@@ -13,7 +13,6 @@ const LLAMA_DIR = path.join(HOME, 'llama.cpp');
 const LLAMA_CLI = path.join(HOME, 'llama-cli');
 const LLAMA_SERVER = path.join(HOME, 'llama-server');
 
-// 🔧 FIX 1: Updated to 100% real, verified, and high-performance Hugging Face repositories.
 const MODELS = {
   "1": { name: "Qwen 2.5 (0.5B)", hf: "bartowski/Qwen2.5-0.5B-Instruct-GGUF:Q4_K_M", desc: "Small, highly capable math and reasoning model." },
   "2": { name: "SmolLM2 Instruct (360M)", hf: "bartowski/SmolLM2-360M-Instruct-GGUF:Q4_K_M", desc: "Compact instruction-following model for lightweight tasks." },
@@ -49,7 +48,6 @@ function runCommand(desc, cmd) {
     }
 }
 
-// 🔧 FIX 2: Queries the Hugging Face API to find the exact filename, bypassing the 401/wildcard errors natively.
 async function getHfArgs(hfString) {
     if (!hfString.includes(':')) return ['--hf-repo', hfString];
 
@@ -73,7 +71,6 @@ async function getHfArgs(hfString) {
         const data = await res.json();
         if (!data.siblings) throw new Error("Invalid repository data.");
 
-        // Find exact filename dynamically
         const fileObj = data.siblings.find(s => 
             s.rfilename.toLowerCase().includes(quant.toLowerCase()) && 
             s.rfilename.endsWith('.gguf')
@@ -141,7 +138,7 @@ async function start() {
 async function launchTerminal(model) {
     console.log(`\n🚀 Launching Maxwell Terminal via ${model.name}...\n`);
     
-    const hfArgs = await getHfArgs(model.hf); // Dynamically resolves the exact file
+    const hfArgs = await getHfArgs(model.hf); 
 
     const chat = spawn(LLAMA_CLI, [
         ...hfArgs,
@@ -160,15 +157,15 @@ async function launchCloud(model) {
     console.log(`(Model will automatically download if not cached. See progress below)`);
     console.log("-".repeat(50));
 
-    const hfArgs = await getHfArgs(model.hf); // Dynamically resolves the exact file
+    const hfArgs = await getHfArgs(model.hf); 
 
+    // 🔧 FIX: Removed the deprecated `--cors` flag.
     const server = spawn(LLAMA_SERVER, [
         ...hfArgs,
         '-t', '8', 
         '-c', '2048', 
         '--host', '0.0.0.0', 
-        '--port', '8080',
-        '--cors'             
+        '--port', '8080'
     ], { shell: false });
 
     activeProcesses.push(server);
