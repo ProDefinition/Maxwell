@@ -1,3 +1,7 @@
+/*
+Please run the command below before continueing forward.
+pkg update -y && pkg upgrade -y && pkg install -y git cmake clang wget libandroid-spawn && git clone https://github.com/ggml-org/llama.cpp && cd llama.cpp && cmake -B build && cmake --build build --config Release -j8 && cp build/bin/llama-cli ~/llama-cli
+*/
 const { spawn, execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
