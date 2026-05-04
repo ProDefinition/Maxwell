@@ -13,13 +13,29 @@ const LLAMA_DIR = path.join(HOME, 'llama.cpp');
 const LLAMA_CLI = path.join(HOME, 'llama-cli');
 const LLAMA_SERVER = path.join(HOME, 'llama-server');
 
+// --- UPDATED MODELS DICTIONARY ---
+// Added Vision, Liquid AI (LFM), and TTS models natively supported by llama.cpp
 const MODELS = {
+  // Existing Base / Chat Models
   "1": { name: "Qwen 2.5 (0.5B)", hf: "bartowski/Qwen2.5-0.5B-Instruct-GGUF:Q4_K_M", desc: "Small, highly capable math and reasoning model." },
   "2": { name: "SmolLM2 Instruct (360M)", hf: "bartowski/SmolLM2-360M-Instruct-GGUF:Q4_K_M", desc: "Compact instruction-following model for lightweight tasks." },
   "3": { name: "Llama 3.2 (1B)", hf: "bartowski/Llama-3.2-1B-Instruct-GGUF:Q4_K_M", desc: "Fast, efficient text model optimized for edge inference." },
   "4": { name: "Qwen 2.5 (1.5B)", hf: "bartowski/Qwen2.5-1.5B-Instruct-GGUF:Q4_K_M", desc: "Stronger reasoning and conversational performance." },
   "5": { name: "H2O Danube 3 (500M)", hf: "h2oai/h2o-danube3-500m-chat-GGUF:q4_k_m", desc: "Small chat model with excellent latency." },
-  "6": { name: "Llama 3.2 (3B)", hf: "bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M", desc: "Mid-size model for heavier general-purpose local inference." }
+  "6": { name: "Llama 3.2 (3B)", hf: "bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M", desc: "Mid-size model for heavier general-purpose local inference." },
+  
+  // NEW: Vision Models
+  "7": { name: "Llama 3.2 Vision (11B)", hf: "bartowski/Llama-3.2-11B-Vision-Instruct-GGUF:Q4_K_M", desc: "Multimodal Vision model by Meta (Image + Text analysis)." },
+  "8": { name: "Qwen2-VL (2B)", hf: "bartowski/Qwen2-VL-2B-Instruct-GGUF:Q4_K_M", desc: "Fast Vision-Language model for image reasoning & document parsing." },
+  "9": { name: "MiniCPM-V 2.6", hf: "openbmb/MiniCPM-V-2_6-gguf:Q4_K_M", desc: "Strong edge-focused Vision model for detailed image chatting." },
+  
+  // NEW: Liquid AI Models
+  "10": { name: "Liquid LFM (1B)", hf: "bartowski/LFM-1b-GGUF:Q4_K_M", desc: "Liquid Foundation Model (State Space/MoE) by Liquid AI." },
+  "11": { name: "Liquid LFM (3B)", hf: "bartowski/LFM-3b-GGUF:Q4_K_M", desc: "Larger Liquid AI model optimized for long context and sequential logic." },
+  "12": { name: "Liquid LFM Vision", hf: "bartowski/LFM-3b-Vision-GGUF:Q4_K_M", desc: "Experimental Liquid AI Vision-capable model (if available/cached)." },
+  
+  // NEW: TTS (Text-to-Speech) Models
+  "13": { name: "OuteTTS 0.2 (500M)", hf: "OuteAI/OuteTTS-0.2-500M-GGUF:Q4_K_M", desc: "Native Text-to-Speech LLM. Generates audio tokens seamlessly." }
 };
 
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
@@ -110,7 +126,8 @@ async function start() {
 
     console.log("[ SELECT MODEL ]");
     Object.entries(MODELS).forEach(([k, v]) => {
-        console.log(` [${k}] ${v.name.padEnd(25)} | ${v.desc}`);
+        // Formatted to make names align better with the extra models
+        console.log(` [${k.padStart(2)}] ${v.name.padEnd(26)} | ${v.desc}`);
     });
     
     let model = null;
