@@ -19,13 +19,7 @@ const MODELS = {
   "3": { name: "Llama 3.2 (1B)", hf: "bartowski/Llama-3.2-1B-Instruct-GGUF:Q4_K_M", desc: "Fast, efficient text model optimized for edge inference." },
   "4": { name: "Qwen 2.5 (1.5B)", hf: "bartowski/Qwen2.5-1.5B-Instruct-GGUF:Q4_K_M", desc: "Stronger reasoning and conversational performance." },
   "5": { name: "H2O Danube 3 (500M)", hf: "h2oai/h2o-danube3-500m-chat-GGUF:q4_k_m", desc: "Small chat model with excellent latency." },
-  "6": { name: "Llama 3.2 (3B)", hf: "bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M", desc: "Mid-size model for heavier general-purpose local inference." },
-  "7": { 
-  name: "Liquid LFM2.5 (1.2B)", 
-  hf: "LiquidAI/LFM2.5-1.2B-Instruct-GGUF", 
-  file: "LFM2.5-1.2B-Instruct-Q4_K_M.gguf",
-  desc: "Small on-device instruction model for fast local inference." 
-}
+  "6": { name: "Llama 3.2 (3B)", hf: "bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M", desc: "Mid-size model for heavier general-purpose local inference." }
 };
 
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
