@@ -18,9 +18,11 @@ const MODELS = {
   "2": { name: "SmolLM2 Instruct (360M)", hf: "bartowski/SmolLM2-360M-Instruct-GGUF:Q4_K_M", desc: "Compact instruction-following model for lightweight tasks." },
   "3": { name: "Llama 3.2 (1B)", hf: "bartowski/Llama-3.2-1B-Instruct-GGUF:Q4_K_M", desc: "Fast, efficient text model optimized for edge inference." },
   "4": { name: "Qwen 2.5 (1.5B)", hf: "bartowski/Qwen2.5-1.5B-Instruct-GGUF:Q4_K_M", desc: "Stronger reasoning and conversational performance." },
-  "5": { name: "H2O Danube 3 (500M)", hf: "h2oai/h2o-danube3-500m-chat-GGUF:q4_k_m", desc: "Small chat model with excellent latency." },
-  "6": { name: "Llama 3.2 (3B)", hf: "bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M", desc: "Mid-size model for heavier general-purpose local inference." }
+  "5": { name: "Gemma 3 (1B)", hf: "bartowski/google_gemma-3-1b-it-GGUF:Q4_K_M", desc: "Google's 2025 small-scale powerhouse with 128k context." },
+  "6": { name: "Gemma 3 (270M)", hf: "bartowski/google_gemma-3-270m-it-GGUF:Q4_K_M", desc: "Ultra-lightweight Google model for basic logic and speed." },
+  "7": { name: "Llama 3.2 (3B)", hf: "bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M", desc: "Mid-size model for heavier general-purpose local inference." }
 };
+
 
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 let activeProcesses = []; 
